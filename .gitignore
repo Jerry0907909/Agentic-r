@@ -1,0 +1,33 @@
+# ── 环境变量：含真实密钥，绝不入库 ──
+.env
+.env.*
+!.env.example
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── 向量库索引：可由 backend/utils/rag_index.py 重建，且体积可观 ──
+backend/faiss-index/
+
+# ── 前端 ──
+node_modules/
+dist/
+.vite/
+
+# ── 编辑器与系统（含机器相关绝对路径，不入库）──
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# ── 日志与临时文件 ──
+*.log
+*.tmp

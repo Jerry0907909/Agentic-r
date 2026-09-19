@@ -1,0 +1,45 @@
+# 后端依赖清单
+# 安装：pip install -r backend/requirements.txt
+#
+# 版本按本机 conda env `agent_rag`（Python 3.12）实际安装版本导出。
+
+# ── 智能体编排 ──
+langchain==1.0.0
+langchain-core==1.6.2
+langchain-community==0.4.2
+langchain-ollama==1.1.0
+langchain-openai==1.0.0
+langchain-text-splitters==1.1.2
+langgraph==1.0.4
+langgraph-checkpoint==3.0.1
+
+# ── 向量检索 ──
+faiss-cpu==1.15.0
+numpy==2.4.6
+unstructured==0.27.5
+
+# ── 图数据库 ──
+neo4j==6.2.0
+
+# ── Web 服务 ──
+fastapi==0.116.1
+uvicorn==0.38.0
+python-multipart==0.0.20
+pydantic==2.12.5
+
+# ── 数据库（会话持久化）──
+sqlalchemy==2.0.52
+pymysql==1.1.2
+
+# ── 模型客户端 ──
+openai==2.9.0
+ollama==0.6.2
+httpx==0.28.1
+tiktoken==0.13.0
+
+# ── 配置 ──
+python-dotenv==1.2.1
+
+# ── 待安装：混合检索（BM25 稀疏通道 + 中文分词）──
+jieba==0.42.1
+rank_bm25==0.2.2
