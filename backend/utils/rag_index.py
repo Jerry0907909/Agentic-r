@@ -8,11 +8,22 @@
     python utils/rag_index.py                 # 构建 springboot 索引 -> faiss-index/default
     python utils/rag_index.py medical         # 构建医疗索引      -> faiss-index/medical
     python utils/rag_index.py medical --chunk-size 500
+    python utils/rag_index.py medical --no-bm25   # 只建 FAISS，跳过 BM25 语料
+
+产出两份产物（见 系统设计.md ADR-6，两套索引物理分离）：
+    <索引目录>/index.faiss     —— 稠密通道：向量索引
+    <索引目录>/index.pkl       —— 稠密通道：文档与 id 映射
+    <索引目录>/bm25_corpus.pkl —— 稀疏通道：分块原文 + 元数据 + 预分词结果
+
+为什么必须同时产出 BM25 语料：FAISS 索引里只存向量，BM25 需要的是**原始文本**。
+少了它，混合检索会静默退化成纯向量检索 —— 功能看着正常，召回却差一截。
 """
 
 import argparse
+import pickle
 import shutil
 import sys
+import time
 from pathlib import Path
 from typing import List
 
@@ -25,7 +36,13 @@ from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from llm.ollama_llm import ollama_embedding
-from backend.utils.paths import PROJECT_ROOT, index_path, require_env
+from retrieval.sparse import CORPUS_VERSION, tokenize
+from utils.paths import (
+    BM25_CORPUS_FILENAME,
+    PROJECT_ROOT,
+    index_path,
+    require_env,
+)
 
 # 源文档在本包内，直接用项目根拼；向量库路径一律问 utils.paths 要，不在这里自己拼
 DOC_PATH = PROJECT_ROOT / "utils" / "docs" / "springboot-intro.md"
@@ -131,7 +148,12 @@ def _embed_to_index(chunks: List[Document]) -> FAISS:
 
 
 # 向量化并写入向量数据库
-def save_document(chunks: List[Document], target: Path = INDEX_PATH, batch_size: int = BATCH_SIZE):
+def save_document(
+    chunks: List[Document],
+    target: Path = INDEX_PATH,
+    batch_size: int = BATCH_SIZE,
+    with_bm25: bool = True,
+):
     target = Path(target)
     # 旧索引存在则先删除，避免新旧数据混在一起
     if target.exists():
@@ -154,6 +176,52 @@ def save_document(chunks: List[Document], target: Path = INDEX_PATH, batch_size:
     vectorstore.save_local(str(target))
     print(f"向量库已保存到 {target}")
 
+    if with_bm25:
+        save_bm25_corpus(chunks, target)
+
+
+# BM25 语料落盘：分块原文 + 元数据 + 预分词结果
+def save_bm25_corpus(chunks: List[Document], target: Path):
+    """写出 <target>/bm25_corpus.pkl，供 retrieval/sparse.py 建 BM25 索引。
+
+    两个关键点：
+
+    1. **顺序必须与 FAISS 一致**。两个文件都由同一个 chunks 列表派生，
+       下标 i 在两边指向同一段文本。RRF 融合靠这个对齐，顺序一乱，
+       融合出来的「第 3 名」在两条通道里是两段不同的文本。
+
+    2. **预分词后落盘**，而不是存原文、查询时再切。3 万块用 jieba 分词实测
+       要 30-60 秒；如果放到服务启动或首次查询时做，演示时第一问会卡住。
+       这里在构建期一次性算好（构建本来就要 20 分钟，多这 1 分钟无所谓），
+       运行时只需 pickle.load，1-2 秒完成。
+    """
+    target = Path(target)
+    target.mkdir(parents=True, exist_ok=True)
+
+    print(f"  正在分词 {len(chunks)} 个文本块（BM25 语料）…", flush=True)
+    started = time.time()
+    tokenized: list[list[str]] = []
+    for i, doc in enumerate(chunks):
+        tokenized.append(tokenize(doc.page_content))
+        if (i + 1) % 5000 == 0:
+            print(f"    已分词 {i + 1}/{len(chunks)}", flush=True)
+
+    payload = {
+        "version": CORPUS_VERSION,
+        "chunks": [doc.page_content for doc in chunks],
+        "metadatas": [dict(doc.metadata) for doc in chunks],
+        "tokens": tokenized,
+    }
+    corpus_file = target / BM25_CORPUS_FILENAME
+    with corpus_file.open("wb") as f:
+        pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    size_mb = corpus_file.stat().st_size / 1024 / 1024
+    print(
+        f"  BM25 语料已保存到 {corpus_file}（{size_mb:.1f} MB，"
+        f"分词耗时 {time.time() - started:.1f}s）"
+    )
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -161,6 +229,8 @@ if __name__ == "__main__":
                         choices=["springboot", "medical"])
     parser.add_argument("--chunk-size", type=int, default=None)
     parser.add_argument("--chunk-overlap", type=int, default=None)
+    parser.add_argument("--no-bm25", action="store_true",
+                        help="只建 FAISS 索引，跳过 BM25 语料（混合检索会退化，仅调试用）")
     args = parser.parse_args()
 
     if args.source == "medical":
@@ -169,11 +239,11 @@ if __name__ == "__main__":
             chunk_size=args.chunk_size or 500,
             chunk_overlap=args.chunk_overlap or 50,
         )
-        save_document(chunks, MEDICAL_INDEX_PATH)
+        save_document(chunks, MEDICAL_INDEX_PATH, with_bm25=not args.no_bm25)
     else:
         chunks = split_document(
             load_document(),
             chunk_size=args.chunk_size or 300,
             chunk_overlap=args.chunk_overlap or 30,
         )
-        save_document(chunks, INDEX_PATH)
+        save_document(chunks, INDEX_PATH, with_bm25=not args.no_bm25)

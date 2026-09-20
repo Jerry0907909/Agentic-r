@@ -1,7 +1,8 @@
 # 后端依赖清单
 # 安装：pip install -r backend/requirements.txt
 #
-# 版本按本机 conda env `agent_rag`（Python 3.12）实际安装版本导出。
+# 版本按本机 conda env `agent_rag`（Python 3.12）实际安装版本导出（2026-09-20 核对）。
+# 注意 PyMySQL 的发行版号是 1.1.2，而其 `__version__` 属性报 1.4.6 —— 以发行版号为准。
 
 # ── 智能体编排 ──
 langchain==1.0.0
@@ -18,16 +19,24 @@ faiss-cpu==1.15.0
 numpy==2.4.6
 unstructured==0.27.5
 
+# ── 混合检索（F3 稀疏通道）──
+# jieba 解决中文分词，rank_bm25 提供 BM25。
+# 两者都是纯 Python、零服务依赖 —— 选它们而不是 Elasticsearch 的理由见 系统设计.md §2.2。
+jieba==0.42.1
+rank-bm25==0.2.2
+
 # ── 图数据库 ──
 neo4j==6.2.0
 
 # ── Web 服务 ──
-fastapi==0.116.1
-uvicorn==0.38.0
+# 2026-09-19 核查 PyPI 后已升级（当时接口层还是空文件，是零成本升级窗口）：
+#   fastapi 0.116.1 → 0.141.1，uvicorn 0.38.0 → 0.53.0，pydantic 2.12.5 → 2.13.5
+fastapi==0.141.1
+uvicorn==0.53.0
 python-multipart==0.0.20
-pydantic==2.12.5
+pydantic==2.13.5
 
-# ── 数据库（会话持久化）──
+# ── 数据库（F7 会话持久化）──
 sqlalchemy==2.0.52
 pymysql==1.1.2
 
@@ -35,11 +44,10 @@ pymysql==1.1.2
 openai==2.9.0
 ollama==0.6.2
 httpx==0.28.1
+# tiktoken 用于 agent/runtime.py 做上下文裁剪时的 token 计数。
+# 设计文档原方案用 `token_counter=ollama_model`，但那条路需要额外安装 transformers，
+# 实测直接 ImportError —— 改用已装的 tiktoken 估算。
 tiktoken==0.13.0
 
 # ── 配置 ──
 python-dotenv==1.2.1
-
-# ── 待安装：混合检索（BM25 稀疏通道 + 中文分词）──
-jieba==0.42.1
-rank_bm25==0.2.2

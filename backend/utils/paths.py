@@ -107,3 +107,75 @@ def require_index(name: str | None = None) -> Path:
             f"请先构建：python utils/rag_index.py {INDEX_BUILD_ARGS.get(resolved, resolved)}"
         )
     return path
+
+
+# ── BM25 语料（F3 稀疏通道）─────────────────────────────────────────────────
+# FAISS 索引只存向量，BM25 需要的是**原始文本分块**，两者数据结构完全不同，
+# 因此物理分离成两个产物（见 系统设计.md ADR-6）。这个文件名与 rag_index.py
+# 的落盘名必须一致，改一处就要改另一处，所以只在这里定义一次。
+BM25_CORPUS_FILENAME = "bm25_corpus.pkl"
+
+
+def bm25_corpus_path(name: str | None = None) -> Path:
+    """BM25 语料落盘位置：<索引目录>/bm25_corpus.pkl。只算路径，不检查存在性。"""
+    return index_path(name) / BM25_CORPUS_FILENAME
+
+
+def require_bm25_corpus(name: str | None = None) -> Path:
+    """返回已构建好的 BM25 语料；缺失时明确报错并给出重建命令。
+
+    与 require_index 同样刻意「缺失即报错」：如果这里静默返回空语料，
+    混合检索会悄悄退化成纯向量检索 —— 功能看起来正常，召回却差一截，
+    属于最难发现的那类问题。
+    """
+    resolved = name or os.getenv("FAISS_INDEX_NAME") or DEFAULT_INDEX
+    path = bm25_corpus_path(resolved)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"BM25 语料不存在：{path}\n"
+            f"请重新构建索引（会同时产出 FAISS 与 BM25 两份产物）："
+            f"python utils/rag_index.py {INDEX_BUILD_ARGS.get(resolved, resolved)}"
+        )
+    return path
+
+
+# ── 检索与重排配置（F3）─────────────────────────────────────────────────────
+# 为什么集中在这里：这些参数在 .env、检索层、重排层三处被读，分散读会出现
+# 「改了 .env 但某一路没生效」的情况。统一在这里解析并给默认值，且做类型转换
+# 与合法性校验 —— 以前是 os.getenv("X", "20") 拿到字符串直接当数字用，
+# 出错要等到运行到那行才炸。
+
+def _env_int(key: str, default: int) -> int:
+    raw = os.getenv(key)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        raise RuntimeError(f"环境变量 {key}={raw!r} 不是合法整数，请检查 {ENV_PATH}") from None
+
+
+def _env_bool(key: str, default: bool) -> bool:
+    raw = os.getenv(key)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def retrieval_config() -> dict:
+    """混合检索参数。每次调用都重新读环境变量，便于测试时临时覆盖。"""
+    return {
+        "dense_top_k": _env_int("RETRIEVAL_DENSE_TOP_K", 20),
+        "sparse_top_k": _env_int("RETRIEVAL_SPARSE_TOP_K", 20),
+        "rrf_k": _env_int("RETRIEVAL_RRF_K", 60),
+        "fusion_top_k": _env_int("RETRIEVAL_FUSION_TOP_K", 20),
+    }
+
+
+def rerank_config() -> dict:
+    """重排参数。enabled=False 即降级为 RRF 结果直接返回。"""
+    return {
+        "enabled": _env_bool("RERANK_ENABLED", True),
+        "model": os.getenv("RERANK_MODEL") or "gte-rerank-v2",
+        "top_n": _env_int("RERANK_TOP_N", 5),
+    }

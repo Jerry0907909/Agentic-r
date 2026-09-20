@@ -1,20 +1,25 @@
+"""智能体层：医疗疾病问答（单图谱工具）。
+
+与 `rag_agent` 的差别只有三处：工具集仅 `cypher_tool`、模型固定为云端 Qwen、
+提示词要求「必须先查再答」。为什么图谱问答要用云端模型：生成 Cypher 语句需要
+较强的代码与模式理解能力，本地 4B 模型不足以胜任（见 接口文档.md §3.1）。
+
+对应 需求分析.md F6。
+"""
+
 import asyncio
 import sys
 from pathlib import Path
-from typing import Annotated,TypedDict
+from typing import AsyncIterator, Callable
 
 # 项目根加入模块搜索路径（唯一自举语句，说明见 utils/paths.py）
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from langchain_core.messages import AIMessageChunk,AnyMessage,HumanMessage,SystemMessage
-from langgraph.graph import START,StateGraph
-from langgraph.graph.message import add_messages
-from langgraph.prebuilt import ToolNode,tools_condition
-# 模型层：图谱问答要生成 Cypher，用云端 qwen 比本地 4B 模型靠谱
-from backend.llm.qwen_llm import MyModel
-from backend.tools.cypher_tool import cypher_tool
+from agent.runtime import AgentRuntime
+from llm.qwen_llm import MyModel
+from tools.cypher_tool import cypher_tool
 
-#提示词
+# 提示词
 SYSTEM_PROMPT = """
 一、你是一个疾病查询助手，你只有一个工具
     cypher_tool:cypher语句查询
@@ -29,69 +34,53 @@ SYSTEM_PROMPT = """
     3 回答全程使用中文
 """
 
-#可用工具
-_tools = [cypher_tool]
-#绑定工具
-_model_with_tools = MyModel.get_model().bind_tools(_tools)
+# 可用工具：只有图谱查询
+TOOLS = [cypher_tool]
 
-# 1.定义状态
-class AgentState(TypedDict):
-    messages:Annotated[list[AnyMessage],add_messages]
+_model = MyModel.get_model()
 
-# 2.定义节点:调用模型
-def call_model(state:AgentState):
-    #拼接系统提示词+历史对话消息
-    messages = [SystemMessage(content=SYSTEM_PROMPT)] + state["messages"]
-    #调用模型
-    response = _model_with_tools.invoke(messages)
-    #返回新的AI消息
-    return {"messages":[response]}
+runtime = AgentRuntime(
+    name="graph",
+    system_prompt=SYSTEM_PROMPT,
+    tools=TOOLS,
+    model=_model,
+    model_name=str(getattr(_model, "model_name", "qwen3-max")),
+)
 
-# 3.构建langgraph状态图
-def _build_graph():
-    #创建状态图构建器
-    builder = StateGraph(AgentState)
-    #添加节点
-    builder.add_node("agent", call_model)
-    #添加工具节点
-    builder.add_node("tools", ToolNode(_tools))
-    #添加普通边
-    builder.add_edge(START, "agent")
-    #添加条件边: agent节点结束后, 使用tools_condition做路由判断
-    builder.add_conditional_edges(source="agent", path=tools_condition)
-    #添加普通边
-    builder.add_edge("tools", "agent")
-    #编译图
-    return builder.compile()
 
-#全局图实例
-_graph = _build_graph()
-def _get_graph():
-    global _graph
-    if _graph is None:
-        _graph = _build_graph()
-    return _graph
-
-async def stream_agent(question: str):
-    graph = _graph
-    async for chunk, metadata in graph.astream(
-        input={"messages":[HumanMessage(content=question)]},
-        stream_mode = "messages",
+async def stream_agent(
+    question: str,
+    conversation_id: str | None = None,
+    use_memory: bool = True,
+    history_loader: Callable[[], list[dict]] | None = None,
+) -> AsyncIterator[dict]:
+    """流式问答，产出 `{"c"|"s"|"u": ...}` 事件。接口与 rag_agent 完全一致。"""
+    async for event in runtime.stream(
+        question=question,
+        conversation_id=conversation_id,
+        use_memory=use_memory,
+        history_loader=history_loader,
     ):
-        if metadata.get("langgraph_node") != "agent":
-            continue
-        if not isinstance(chunk, AIMessageChunk):
-            continue
-        content = chunk.content
-        #处理模型返回的内容
-        if isinstance(content, list):
-            content = "".join(block.get("text", "") for block in content if isinstance(block, dict))
-        if content:
-            yield content
+        yield event
+
+
+def delete_thread(conversation_id: str) -> None:
+    """删除会话时同步清理内存上下文（见 系统设计.md §1.7.7）。"""
+    runtime.delete_thread(conversation_id)
+
 
 if __name__ == "__main__":
     async def _main():
-        async for chunk in stream_agent("百日咳有哪些症状？"):
-            print(chunk, end="", flush=True)
+        question = "百日咳有哪些症状？"
+        print(f"问题：{question}\n")
+        async for event in stream_agent(question, conversation_id="demo-thread-graph"):
+            if "c" in event:
+                print(event["c"], end="", flush=True)
+            elif "s" in event:
+                print(f"\n\n【溯源】{len(event['s'])} 条")
+                for s in event["s"]:
+                    print(f"  · [{s['type']}] {s['name']}  相关度={s['score']}")
+            elif "u" in event:
+                print(f"\n【用量】{event['u']}")
 
     asyncio.run(_main())
