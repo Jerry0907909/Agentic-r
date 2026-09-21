@@ -29,7 +29,7 @@ def _isoformat(dt: datetime | None) -> str | None:
 
 # ── 枚举 ────────────────────────────────────────────────────────────────────
 class AgentType(str, Enum):
-    RAG = "rag"        # 双工具智能体
+    RAG = "rag"        # 单医学资料检索智能体
     GRAPH = "graph"    # 单图谱工具智能体
 
 

@@ -10,24 +10,25 @@ import type { ChatMessage } from '@/types/stream'
 export function MessageBubble({ message }: { message: ChatMessage }) {
   const assistant = message.role === 'assistant'
   return (
-    <article className={cn('flex gap-3', !assistant && 'flex-row-reverse')}>
+    <article className={cn('flex gap-2.5 sm:gap-3', !assistant && 'flex-row-reverse')}>
       <div
         className={cn(
-          'grid h-8 w-8 shrink-0 place-items-center rounded-xl border',
+          'grid h-9 w-9 shrink-0 place-items-center rounded-2xl border',
           assistant
-            ? 'border-primary/20 bg-primary/10 text-primary'
-            : 'border-primary bg-primary text-primary-foreground',
+            ? 'border-primary/15 bg-primary/10 text-primary'
+            : 'border-primary bg-primary text-primary-foreground shadow-sm',
         )}
       >
-        {assistant ? <Bot className="h-4 w-4" /> : <UserRound className="h-4 w-4" />}
+        {assistant ? <Bot aria-hidden="true" className="h-4 w-4" /> : <UserRound aria-hidden="true" className="h-4 w-4" />}
       </div>
       <div className={cn('min-w-0 max-w-[min(760px,85%)]', !assistant && 'text-right')}>
+        {assistant && <div className="mb-1.5 px-1 text-[11px] font-semibold text-primary">医知助手</div>}
         <div
           className={cn(
-            'inline-block max-w-full rounded-2xl px-4 py-3 text-left text-sm leading-7 shadow-sm',
+            'inline-block max-w-full rounded-2xl px-4 py-3 text-left text-sm leading-7',
             assistant
-              ? 'rounded-tl-md border border-border bg-card text-foreground'
-              : 'rounded-tr-md bg-primary text-primary-foreground',
+              ? 'rounded-tl-md border border-border/90 bg-card text-foreground shadow-soft sm:px-5 sm:py-4'
+              : 'rounded-tr-md bg-primary text-primary-foreground shadow-sm',
           )}
         >
           {assistant ? (
@@ -42,15 +43,15 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
               ) : message.streaming ? (
                 <div className="flex items-center gap-2 py-1 text-muted-foreground">
                   <span className="flex gap-1">
-                    <i className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary [animation-delay:-.3s]" />
-                    <i className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary [animation-delay:-.15s]" />
-                    <i className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary" />
+                    <i aria-hidden="true" className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary [animation-delay:-.3s]" />
+                    <i aria-hidden="true" className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary [animation-delay:-.15s]" />
+                    <i aria-hidden="true" className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary" />
                   </span>
                   正在检索并组织答案…
                 </div>
               ) : null}
               {message.error && (
-                <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs leading-5 text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+                <div className="mt-3 rounded-lg border border-danger/25 bg-danger/5 px-3 py-2 text-xs leading-5 text-danger">
                   {message.error}
                 </div>
               )}

@@ -1,12 +1,12 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Header } from '@/components/Header'
 import { Sidebar } from '@/components/Sidebar'
 import { MessageBubble } from '@/components/MessageBubble'
 import { EmptyState } from '@/components/EmptyState'
 import { Composer } from '@/components/Composer'
 import { Toast, type ToastState } from '@/components/Toast'
-import { getHealth, toChatMessage } from '@/lib/api-client'
+import { toChatMessage } from '@/lib/api-client'
 import { conversationKeys, useConversations, useDeleteConversation, useMessages, useRenameConversation } from '@/hooks/useConversations'
 import { useChatStream } from '@/hooks/useChatStream'
 import type { AgentType, ChatMessage, Conversation, StreamEvent } from '@/types/stream'
@@ -24,18 +24,20 @@ export default function App() {
   const [messagesByTab, setMessagesByTab] = useState<TabMap<ChatMessage[]>>(initialMessages)
   const [draftByTab, setDraftByTab] = useState<TabMap<string>>(initialDrafts)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => localStorage.getItem('agentic-rag-sidebar-collapsed') === 'true',
+  )
   const [toast, setToast] = useState<ToastState | null>(null)
   const [dark, setDark] = useState(() => localStorage.getItem('agentic-rag-theme') === 'dark')
   const scrollRef = useRef<HTMLDivElement>(null)
   const keepAtBottomRef = useRef(true)
 
   const currentId = selectedByTab[activeTab]
-  const currentMessages = messagesByTab[activeTab]
+  const localMessages = messagesByTab[activeTab]
   const conversationsQuery = useConversations()
   const messagesQuery = useMessages(currentId)
   const renameMutation = useRenameConversation()
   const deleteMutation = useDeleteConversation()
-  const healthQuery = useQuery({ queryKey: ['health'], queryFn: getHealth, refetchInterval: 30_000 })
   const chat = useChatStream()
 
   const notify = useCallback((message: string, tone: ToastState['tone'] = 'info') => {
@@ -48,40 +50,28 @@ export default function App() {
   }, [dark])
 
   useEffect(() => {
-    if (!currentId || !messagesQuery.data || chat.busy) return
-    const loaded = messagesQuery.data.items.map(toChatMessage)
-    setMessagesByTab((previous) => ({ ...previous, [activeTab]: loaded }))
-  }, [activeTab, chat.busy, currentId, messagesQuery.data])
+    localStorage.setItem('agentic-rag-sidebar-collapsed', String(sidebarCollapsed))
+  }, [sidebarCollapsed])
+
+  const currentMessages = currentId && !chat.busy && messagesQuery.data &&
+    messagesQuery.data.items.length > localMessages.length
+    ? messagesQuery.data.items.map(toChatMessage)
+    : localMessages
 
   useEffect(() => {
-    if (!messagesQuery.error) return
-    notify(messagesQuery.error instanceof Error ? messagesQuery.error.message : '历史消息加载失败', 'error')
-  }, [messagesQuery.error, notify])
-
-  useEffect(() => {
-    if (!keepAtBottomRef.current) return
     const frame = requestAnimationFrame(() => {
       const element = scrollRef.current
-      if (element) element.scrollTop = element.scrollHeight
+      if (!element) return
+      if (currentMessages.length === 0) {
+        element.scrollTop = 0
+      } else if (keepAtBottomRef.current) {
+        element.scrollTop = element.scrollHeight
+      }
     })
     return () => cancelAnimationFrame(frame)
   }, [currentMessages])
 
   const allConversations = conversationsQuery.data?.items ?? []
-  const conversations = useMemo(
-    () => allConversations.filter((conversation) => conversation.agent_type === activeTab),
-    [activeTab, allConversations],
-  )
-  const selectedConversation = allConversations.find((conversation) => conversation.id === currentId)
-
-  const healthOkay = healthQuery.data
-    ? healthQuery.data.mysql === 'ok' &&
-      healthQuery.data.neo4j === 'ok' &&
-      healthQuery.data.ollama === 'ok' &&
-      healthQuery.data.bm25_corpus !== 'missing'
-    : healthQuery.isError
-      ? false
-      : null
 
   const updateAssistant = useCallback(
     (tab: AgentType, assistantId: string, update: (message: ChatMessage) => ChatMessage) => {
@@ -166,12 +156,13 @@ export default function App() {
     )
   }
 
-  const selectConversation = (id: string) => {
+  const selectConversation = (conversation: Conversation) => {
     if (chat.busy) chat.stop()
     chat.reset()
     keepAtBottomRef.current = true
-    setSelectedByTab((previous) => ({ ...previous, [activeTab]: id }))
-    setMessagesByTab((previous) => ({ ...previous, [activeTab]: [] }))
+    setActiveTab(conversation.agent_type)
+    setSelectedByTab((previous) => ({ ...previous, [conversation.agent_type]: conversation.id }))
+    setMessagesByTab((previous) => ({ ...previous, [conversation.agent_type]: [] }))
     setSidebarOpen(false)
   }
 
@@ -185,12 +176,15 @@ export default function App() {
   }
 
   const switchTab = (tab: AgentType) => {
-    if (tab === activeTab) return
     if (chat.busy) {
-      notify('请等待当前回答完成或先点击停止，再切换问答模式')
+      notify('请等待当前回答完成或先点击停止，再进入新的问答页面')
       return
     }
+    chat.reset()
     setActiveTab(tab)
+    setSelectedByTab((previous) => ({ ...previous, [tab]: null }))
+    setMessagesByTab((previous) => ({ ...previous, [tab]: [] }))
+    setDraftByTab((previous) => ({ ...previous, [tab]: '' }))
     keepAtBottomRef.current = true
     setSidebarOpen(false)
   }
@@ -210,12 +204,29 @@ export default function App() {
     if (!window.confirm(`确定删除“${conversation.title}”及其全部消息吗？此操作不可撤销。`)) return
     try {
       await deleteMutation.mutateAsync(conversation.id)
-      if (selectedByTab[activeTab] === conversation.id) newConversation()
+      if (selectedByTab[conversation.agent_type] === conversation.id) {
+        setSelectedByTab((previous) => ({ ...previous, [conversation.agent_type]: null }))
+        setMessagesByTab((previous) => ({ ...previous, [conversation.agent_type]: [] }))
+      }
       notify('会话已删除', 'success')
     } catch (cause) {
       notify(cause instanceof Error ? cause.message : '删除失败', 'error')
     }
   }
+
+  const isHome = !currentId && currentMessages.length === 0 && !chat.busy
+  const composer = (
+    <Composer
+      placement={isHome ? 'home' : 'conversation'}
+      value={draftByTab[activeTab]}
+      busy={chat.busy}
+      mode={activeTab}
+      onChange={(value) => setDraftByTab((previous) => ({ ...previous, [activeTab]: value }))}
+      onSend={() => sendQuestion()}
+      onStop={chat.stop}
+      onNotice={notify}
+    />
+  )
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
@@ -223,18 +234,20 @@ export default function App() {
         activeTab={activeTab}
         busy={chat.busy}
         dark={dark}
-        healthOkay={healthOkay}
+        sidebarCollapsed={sidebarCollapsed}
         onOpenSidebar={() => setSidebarOpen(true)}
         onTabChange={switchTab}
+        onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
         onToggleTheme={() => setDark((value) => !value)}
       />
 
       <div className="flex min-h-0 flex-1">
         <Sidebar
-          conversations={conversations}
+          conversations={allConversations}
           selectedId={currentId}
           open={sidebarOpen}
           loading={conversationsQuery.isLoading}
+          collapsed={sidebarCollapsed}
           onClose={() => setSidebarOpen(false)}
           onNew={newConversation}
           onSelect={selectConversation}
@@ -242,21 +255,13 @@ export default function App() {
           onDelete={removeConversation}
         />
 
-        <main className="flex min-w-0 flex-1 flex-col">
-          {selectedConversation && (
-            <div className="flex h-11 shrink-0 items-center border-b border-border/70 px-5 text-xs text-muted-foreground md:px-8">
-              <span className="truncate font-medium text-foreground">{selectedConversation.title}</span>
-              <span className="mx-2">·</span>
-              <span>{selectedConversation.message_count} 条消息</span>
-              {selectedConversation.total_tokens > 0 && (
-                <>
-                  <span className="mx-2">·</span>
-                  <span>{selectedConversation.total_tokens.toLocaleString()} tokens</span>
-                </>
-              )}
+        <main className="flex min-w-0 flex-1 flex-col bg-background">
+
+          {messagesQuery.error && currentId && (
+            <div role="alert" className="border-b border-danger/20 bg-danger/5 px-5 py-2 text-sm text-danger md:px-8">
+              {messagesQuery.error instanceof Error ? messagesQuery.error.message : '历史消息加载失败'}
             </div>
           )}
-
           <div
             ref={scrollRef}
             className="min-h-0 flex-1 overflow-y-auto"
@@ -271,6 +276,7 @@ export default function App() {
               </div>
             ) : currentMessages.length === 0 ? (
               <EmptyState
+                composer={isHome ? composer : undefined}
                 mode={activeTab}
                 onSelect={(prompt) => {
                   setDraftByTab((previous) => ({ ...previous, [activeTab]: prompt }))
@@ -278,21 +284,13 @@ export default function App() {
                 }}
               />
             ) : (
-              <div className="mx-auto max-w-4xl space-y-6 px-4 py-7 md:px-8">
+              <div className="mx-auto max-w-4xl space-y-7 px-4 py-7 md:px-8 md:py-9">
                 {currentMessages.map((message) => <MessageBubble key={message.id} message={message} />)}
               </div>
             )}
           </div>
 
-          <Composer
-            value={draftByTab[activeTab]}
-            busy={chat.busy}
-            mode={activeTab}
-            onChange={(value) => setDraftByTab((previous) => ({ ...previous, [activeTab]: value }))}
-            onSend={() => sendQuestion()}
-            onStop={chat.stop}
-            onNotice={notify}
-          />
+          {!isHome && composer}
         </main>
       </div>
 

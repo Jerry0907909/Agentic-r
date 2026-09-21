@@ -2,7 +2,7 @@
 
 > 智能科学与技术综合实训课程项目 · Jasmine honey tea 组
 
-基于 **LangGraph** 构建的 Agentic RAG 系统，面向医疗领域。系统在 Neo4j 医疗知识图谱与「BM25 + FAISS」混合索引之上编排双工具，由大模型自主决定「查图谱关系」还是「检索描述文本」，并以流式方式输出带**来源溯源**与 **token 用量**的回答，会话与消息持久化到 MySQL。
+基于 **LangGraph** 构建的 Agentic RAG 系统，面向医疗领域。系统提供相互独立的“医疗健康问答”和“知识图谱查询”入口：前者面向症状、疾病、用药与日常健康问题，底层使用「BM25 + FAISS」混合索引；后者查询 Neo4j 医疗知识图谱。两者均以流式方式输出带**来源溯源**与 **token 用量**的回答，会话与消息持久化到 MySQL。
 
 ---
 
@@ -10,7 +10,7 @@
 
 | 能力 | 说明 | 对应需求 |
 | --- | --- | --- |
-| 双工具智能体 | LangGraph `agent ⇄ tools` 循环，模型自主选择工具 | F3 / F6 |
+| 双模式智能体 | 两个 LangGraph `agent ⇄ tool` 循环分别绑定医学资料与知识图谱 | F3 / F6 |
 | 图谱关系查询 | `cypher_tool` 查询 Neo4j 医疗知识图谱（**服务端强制只读**） | F6 |
 | **混合检索** | BM25（jieba 分词）+ FAISS 向量 → RRF 融合 → DashScope `gte-rerank` 精排 | F3 |
 | **回答溯源** | 工具返回结构化 `(content, artifact)`，来源贯穿「工具 → 状态 → 流式协议 → 前端」四层 | F4 |
@@ -112,7 +112,25 @@ agentic-r/
 
 ## 快速开始
 
-### 1. 环境准备
+### 前端零外部依赖开发（推荐先使用）
+
+Mock API 不需要安装或启动 MySQL、Neo4j、Ollama，也不需要 DashScope API Key。打开两个终端：
+
+```powershell
+# 终端 A：启动 Mock 后端
+cd backend
+..\.venv\Scripts\python.exe -m mock_api
+
+# 终端 B：启动 React 前端
+cd frontend
+npm run dev
+```
+
+访问 `http://127.0.0.1:5173`。Mock 的状态只保存在当前进程，重启后会话清空；可用 `[mock:empty]`、`[mock:error]` 和 `[mock:slow]` 验证前端状态。
+
+### 真实服务联调
+
+#### 1. 环境准备
 
 ```bash
 # 依赖服务
@@ -123,13 +141,13 @@ ollama pull nomic-embed-text      # 只需要嵌入模型，不需要对话模�
 # MySQL：brew services start mysql
 ```
 
-### 2. 安装依赖
+#### 2. 安装依赖
 
 ```bash
 pip install -r backend/requirements.txt
 ```
 
-### 3. 配置环境变量
+#### 3. 配置环境变量
 
 ```bash
 cp backend/.env.example backend/.env
@@ -142,7 +160,7 @@ cp backend/.env.example backend/.env
 > 它会**覆盖**同名系统环境变量（为压制 `~/.zshrc` 里 source 的 Aura 凭据）。
 > 因此调试时 `FOO=bar python xxx.py` 这种临时覆盖**不生效**，改配置要直接改 `.env`。
 
-### 4. 建库建表
+#### 4. 建库建表
 
 ```bash
 cd backend
@@ -150,7 +168,7 @@ python db/init_db.py              # 建库 + 建表（幂等）
 python db/init_db.py --check      # 只检查现状，不做改动
 ```
 
-### 5. 准备数据
+#### 5. 准备数据
 
 医疗知识图谱需先导入 Neo4j（数据来源为实训提供的 CSV 数据集），随后构建索引：
 
@@ -162,7 +180,7 @@ python utils/rag_index.py medical      # 同时产出 FAISS 与 BM25 两份产�
 > 医疗语料约 3 万个文本块，构建耗时约 20 分钟（含分词约 1 分钟）。
 > 该命令会**删除并重建**目标索引目录，`--no-bm25` 可跳过 BM25 语料（仅调试用）。
 
-### 6. 运行
+#### 6. 运行
 
 ```bash
 # 命令行冒烟测试

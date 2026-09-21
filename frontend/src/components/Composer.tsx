@@ -31,6 +31,7 @@ function recognitionConstructor(): RecognitionConstructor | null {
 }
 
 type ComposerProps = {
+  placement?: 'home' | 'conversation'
   value: string
   busy: boolean
   mode: 'rag' | 'graph'
@@ -41,6 +42,7 @@ type ComposerProps = {
 }
 
 export function Composer({
+  placement = 'conversation',
   value,
   busy,
   mode,
@@ -90,9 +92,9 @@ export function Composer({
   }
 
   return (
-    <div className="border-t border-border bg-card/90 px-4 py-3 backdrop-blur-xl md:px-8">
-      <div className="mx-auto max-w-4xl">
-        <div className="flex items-end gap-2 rounded-2xl border border-border bg-background p-2 shadow-soft transition-shadow focus-within:border-primary/50 focus-within:ring-4 focus-within:ring-primary/10">
+    <div className={cn('shrink-0', placement === 'home' ? 'w-full' : 'bg-gradient-to-t from-background via-background to-background/70 px-3 pb-3 pt-2 md:px-8 md:pb-5')}>
+      <div className="mx-auto max-w-4xl rounded-[22px] border border-border/90 bg-card p-2 shadow-lifted transition-[border-color,box-shadow] focus-within:border-primary/45 focus-within:ring-4 focus-within:ring-primary/10">
+        <div className="flex items-center gap-1.5 sm:gap-2">
           <Tooltip content={speechSupported ? (listening ? '停止语音识别' : '语音输入') : '请使用 Chrome 或 Edge'}>
             <Button
               type="button"
@@ -103,7 +105,7 @@ export function Composer({
               className={cn('shrink-0 rounded-xl', listening && 'animate-pulse-ring bg-primary/10 text-primary')}
               aria-label={listening ? '停止语音识别' : '开始语音输入'}
             >
-              {speechSupported ? <Mic className="h-4.5 w-4.5" /> : <MicOff className="h-4.5 w-4.5" />}
+              {speechSupported ? <Mic aria-hidden="true" className="h-4.5 w-4.5" /> : <MicOff aria-hidden="true" className="h-4.5 w-4.5" />}
             </Button>
           </Tooltip>
 
@@ -112,8 +114,9 @@ export function Composer({
             value={value}
             disabled={busy}
             maxLength={2000}
-            className="max-h-36 min-h-10 flex-1 resize-none bg-transparent px-1 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
-            placeholder={mode === 'rag' ? '问一个医疗问题，支持多轮追问…' : '查询疾病、症状、药物或检查关系…'}
+            className="max-h-36 min-h-11 min-w-0 flex-1 resize-none border-0 bg-transparent px-1 py-2 text-base leading-7 outline-none placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-0 disabled:cursor-not-allowed sm:text-[15px]"
+            aria-label="输入医疗问题"
+            placeholder={mode === 'rag' ? '描述症状，或询问疾病、用药等问题…' : '查询疾病、症状、药物或检查关系…'}
             onChange={(event) => onChange(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
@@ -125,7 +128,7 @@ export function Composer({
 
           {busy ? (
             <Button type="button" variant="danger" size="icon" onClick={onStop} className="shrink-0 rounded-xl" aria-label="停止生成">
-              <Square className="h-3.5 w-3.5 fill-current" />
+              <Square aria-hidden="true" className="h-3.5 w-3.5 fill-current" />
             </Button>
           ) : (
             <Button
@@ -136,13 +139,9 @@ export function Composer({
               className="shrink-0 rounded-xl"
               aria-label="发送问题"
             >
-              <CornerDownLeft className="h-4.5 w-4.5" />
+              <CornerDownLeft aria-hidden="true" className="h-4.5 w-4.5" />
             </Button>
           )}
-        </div>
-        <div className="mt-2 flex justify-between px-1 text-[10px] text-muted-foreground">
-          <span>Enter 发送 · Shift + Enter 换行</span>
-          <span>{value.length}/2000</span>
         </div>
       </div>
     </div>

@@ -13,3 +13,7 @@ export function formatTime(value?: string) {
 export function formatLatency(milliseconds: number) {
   return milliseconds < 1000 ? `${milliseconds} ms` : `${(milliseconds / 1000).toFixed(1)} s`
 }
+
+export function conversationTurnCount(messageCount: number) {
+  return Math.ceil(Math.max(0, messageCount) / 2)
+}

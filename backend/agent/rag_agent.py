@@ -1,7 +1,7 @@
-"""智能体层：Agentic RAG 对话（双工具）。
+"""智能体层：医疗健康 RAG 问答（单工具）。
 
-模型自主决定走 `retrieve_context`（混合检索描述性文本）还是 `cypher_tool`
-（查图谱关系）。记忆、溯源、用量等通用逻辑在 `agent/runtime.py`。
+模型只使用 `retrieve_context` 检索医学资料。知识图谱关系查询由
+`cypher_agent` 独立负责。记忆、溯源、用量等通用逻辑在 `agent/runtime.py`。
 
 **问答模型固定为云端 DashScope `qwen3-max`**（与 cypher_agent 一致）。
 本地 Ollama 只负责词嵌入，不参与生成 —— 原因见 `llm/ollama_llm.py` 的模块说明。
@@ -19,24 +19,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agent.runtime import AgentRuntime
 from llm.qwen_llm import MyModel
-from tools.cypher_tool import cypher_tool
 from tools.rag_tool import retrieve_context
 
 # 提示词
 SYSTEM_PROMPT = """
-你是一个专业的中文问答助手，你需要根据给定的上下文回答问题。
+你是一个专业的中文医疗健康问答助手，你需要根据检索到的医学资料回答用户的症状、疾病、用药与日常健康问题。
 "1.优先使用retrieve_context()函数获取的参考资料"
 "2.回答应该基于检索的结果，如果检索结果不足，先如实告知用户，再结合自身知识回答"
 "3.回答要结构化，条理清晰"
 "4.如果遇到不确定问题，主动询问用户以确认需求"
 "5.回答全程使用中文"
-"6.涉及疾病、症状、药物、食物、检查项目、科室等实体之间的【关系】时（例如「百日咳有哪些症状」「糖尿病能吃哪些食物」「和某症状相似的疾病有哪些」），用cypher_tool()查询Neo4j医疗知识图谱"
-"7.查询疾病的概念、病因、预防措施、治疗周期等【文本描述】时，用retrieve_context()做向量检索"
-"8.cypher_tool()是只读的，不要生成CREATE/MERGE/DELETE/SET等写语句；不确定关系名时先用 CALL db.relationshipTypes() 查看"
+"6.不要调用或模拟知识图谱查询；疾病实体关系问题由独立的知识图谱查询模式处理"
+"7.回答末尾提示用户可查看医学资料来源，不要把自身知识伪装成检索来源"
 """
 
 # 可用工具
-TOOLS = [retrieve_context, cypher_tool]
+TOOLS = [retrieve_context]
 
 # 问答模型：云端 DashScope（本地 Ollama 只做词嵌入，见模块 docstring）
 _model = MyModel.get_model()

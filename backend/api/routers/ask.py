@@ -1,7 +1,7 @@
 """接口层 · L1 问答域：`POST /api/ask` 与 `POST /api/ask_graph`。
 
 两个端点请求体与响应格式完全一致，差别只在**绑定的智能体**：
-    /api/ask        给模型两个工具自主选择（rag_agent）
+    /api/ask        只给医学资料检索工具（rag_agent）
     /api/ask_graph  只给图谱工具、模型固定云端 Qwen（cypher_agent）
 
 为什么不做成一个接口加参数：两者提示词、工具集、所用模型都不同，合成一个会让
@@ -208,7 +208,7 @@ def _describe_error(exc: Exception) -> str:
 
 @router.post(
     "/ask",
-    summary="Agentic RAG 对话（流式）",
+    summary="医疗健康问答（流式）",
     response_class=StreamingResponse,
     responses={
         200: {
@@ -227,7 +227,7 @@ def _describe_error(exc: Exception) -> str:
     },
 )
 async def ask(payload: AskRequest):
-    """双工具智能体：向量检索 + 图谱查询，模型自主选择。"""
+    """医学资料智能体：仅使用文档检索，不调用知识图谱。"""
     return await _stream_ask(payload, "rag", rag_agent)
 
 
